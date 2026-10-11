@@ -43,7 +43,7 @@ PopupCard {
         .replace(/>/g, "&gt;")
     }
 
-    readonly property color foreground: barHost ? barHost.barForeground : Color.foreground
+    readonly property color foreground: barHost ? barHost.foreground : Color.foreground
     readonly property real rowHeight: Style.spaceReal(15)
     readonly property bool clickable: String(modelData.address || "").length > 0
 
@@ -116,7 +116,7 @@ PopupCard {
     required property var modelData
     required property QtObject barHost
 
-    readonly property color foreground: barHost ? barHost.barForeground : Color.foreground
+    readonly property color foreground: barHost ? barHost.foreground : Color.foreground
     readonly property int inset: Style.space(4)
 
     width: ListView.view ? ListView.view.width : parent.width
@@ -195,7 +195,7 @@ PopupCard {
         id: headerTitle
         anchors.left: parent.left
         text: root.record ? "Workspace " + root.record.id : ""
-        color: root.bar ? root.bar.barForeground : Color.foreground
+        color: root.bar ? root.bar.foreground : Color.foreground
         font.family: Style.font.family
         font.pixelSize: Style.font.body
         font.bold: true
@@ -205,7 +205,7 @@ PopupCard {
         anchors.right: parent.right
         anchors.baseline: headerTitle.baseline
         text: root.record ? root.record.appCount + (root.record.appCount === 1 ? " app" : " apps") + " · " + root.record.windowCount + (root.record.windowCount === 1 ? " window" : " windows") : ""
-        color: root.bar ? root.bar.barForeground : Color.foreground
+        color: root.bar ? root.bar.foreground : Color.foreground
         opacity: 0.65
         font.family: Style.font.family
         font.pixelSize: Style.font.bodySmall
