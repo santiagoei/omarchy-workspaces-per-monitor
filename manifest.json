@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "ei.workspaces-per-monitor",
+  "name": "Workspaces Per Monitor",
+  "version": "1.2.0",
+  "author": "santiagoei",
+  "license": "MIT",
+  "description": "Workspace indicators split per monitor, with a hover preview of the apps open on each",
+  "kinds": ["bar-widget"],
+  "entryPoints": { "barWidget": "WorkspacesPerMonitor.qml" },
+  "barWidget": {
+    "displayName": "Workspaces Per Monitor",
+    "description": "Each monitor's bar shows only that monitor's workspaces; hover previews their apps",
+    "category": "Compositor",
+    "allowMultiple": false
+  }
+}
