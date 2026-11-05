@@ -2,21 +2,15 @@ import QtQuick
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Hyprland
+import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "WorkspaceModel.js" as WorkspaceModel
 
-// Drop-in replacement for omarchy.workspaces that filters the numbers by the
-// monitor this bar instance lives on: each monitor's bar shows only its own
-// workspaces. Optional `ranges` setting in the shell.json layout entry pins
-// which ids a monitor displays, e.g.
-//   { "id": "ei.workspaces-per-monitor",
-//     "ranges": { "eDP-1": [1], "DP-1": [2, 3, 4, 5] } }
-// Keys accept monitor names or Hyprland monitor ids. Workspaces that Hyprland
-// reports on this monitor but that fall outside the configured range are
-// still shown, and a configured id follows its workspace to another monitor:
-// if workspace 4 moves onto the eDP-1 monitor, eDP-1's bar grows to show it
-// and DP-1's bar drops it. An empty pinned id never leaves its monitor.
+// Drop-in replacement for omarchy.workspaces that shows each monitor's own
+// block of workspaces, labelled 1-10 the way Omarchy labels them (see
+// default/hypr/monitor-workspaces.lua in Omarchy). Clicking the active
+// workspace cycles its layout, as in omarchy.workspaces.
 //
 // Hovering a workspace number opens a popover previewing the windows it holds:
 // one row per window, with the app icon and title. Clicking a row focuses that
@@ -51,86 +45,123 @@ BarWidget {
     return window && window.screen ? Hyprland.monitorFor(window.screen) : null
   }
 
-  function configuredIds() {
-    var ranges = root.setting("ranges", null)
-    if (!ranges || typeof ranges !== "object") return null
-    if (!root.monitor) return null
-
-    var list = ranges[String(root.monitor.name || "")]
-    if (list === undefined) list = ranges[String(root.monitor.id)]
-    // Nested shell.json arrays arrive as QVariantList, not a JS Array, so
-    // Array.isArray would reject them. Index access and length still work.
-    if (!list || list.length === undefined) return null
-
-    var ids = []
-    for (var i = 0; i < list.length; i++) {
-      var id = Math.round(Number(list[i]))
-      if (Number.isFinite(id) && id > 0 && id <= 99 && ids.indexOf(id) === -1) ids.push(id)
-    }
-
-    return ids
-  }
-
-  function liveIds() {
-    if (!root.monitor) return []
-
-    var ids = []
-    var values = Hyprland.workspaces.values
-    for (var i = 0; i < values.length; i++) {
-      var ws = values[i]
-      if (ws.id <= 0 || ws.id > 99) continue
-      if (!ws.monitor || ws.monitor.id !== root.monitor.id) continue
-      if (ids.indexOf(ws.id) === -1) ids.push(ws.id)
-    }
-
-    return ids
-  }
-
-  // Ids Hyprland explicitly reports on a different monitor. A configured id
-  // drops off this bar only once it actually exists elsewhere, so an empty
-  // pinned workspace never vanishes from its monitor.
-  function foreignIds() {
-    if (!root.monitor) return []
-
-    var foreign = []
-    var values = Hyprland.workspaces.values
-    for (var i = 0; i < values.length; i++) {
-      var ws = values[i]
-      if (ws.id <= 0 || ws.id > 99) continue
-      if (!ws.monitor || ws.monitor.id === root.monitor.id) continue
-      if (foreign.indexOf(ws.id) === -1) foreign.push(ws.id)
-    }
-
-    return foreign
-  }
-
   // Quickshell's Workspace.monitor notifications do not reliably reach the
   // bindings below, so count Hyprland IPC events that can move workspaces
   // between monitors (or change their windows) and read the counter in
   // workspaceIds() to force a recompute when one lands.
   property int refreshTick: 0
 
+  // Connector -> workspace block, from the file Omarchy keeps them in.
+  property var blocks: ({})
+  readonly property int slots: 10
+
+  function readBlocks(text) {
+    var next = {}
+    var lines = String(text || "").split("\n")
+    for (var i = 0; i < lines.length; i++) {
+      var fields = lines[i].split("\t")
+      if (fields.length >= 3 && fields[1] !== "") next[fields[1]] = parseInt(fields[0], 10)
+    }
+    root.blocks = next
+  }
+
+  FileView {
+    path: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state") + "/omarchy/monitor-workspaces"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: root.readBlocks(text())
+    onLoadFailed: root.readBlocks("")
+  }
+
+  readonly property string monitorName: root.monitor ? String(root.monitor.name || "") : ""
+
+  function blockOf(id) {
+    return Math.floor((id - 1) / root.slots)
+  }
+
+  function slotOf(id) {
+    return (id - 1) % root.slots + 1
+  }
+
+  // Until Omarchy has written the file, the workspace a monitor shows is in
+  // its own block.
+  readonly property int block: {
+    var block = root.blocks[root.monitorName]
+    if (block !== undefined) return block
+    var active = root.monitor && root.monitor.activeWorkspace ? root.monitor.activeWorkspace.id : -1
+    return active > 0 ? root.blockOf(active) : 0
+  }
+
+  // The first five of the monitor's own, and any of the rest that exist. After
+  // them come workspaces that are only visiting: those of a monitor that is
+  // unplugged, which had no room to join this one's.
   function workspaceIds() {
     root.refreshTick
 
-    var live = root.liveIds()
-    var configured = root.configuredIds()
-    if (!configured) {
-      live.sort(function(left, right) { return left - right })
-      return live
-    }
+    var base = root.block * root.slots
+    var ids = [base + 1, base + 2, base + 3, base + 4, base + 5]
+    var guests = []
+    var values = Hyprland.workspaces.values
 
-    var foreign = root.foreignIds()
-    var ids = []
-    for (var i = 0; i < configured.length; i++) {
-      if (foreign.indexOf(configured[i]) === -1) ids.push(configured[i])
-    }
-    for (var j = 0; j < live.length; j++) {
-      if (ids.indexOf(live[j]) === -1) ids.push(live[j])
+    for (var i = 0; i < values.length; i++) {
+      var id = values[i].id
+      if (id <= 0) continue
+      if (root.blockOf(id) === root.block) {
+        if (ids.indexOf(id) === -1) ids.push(id)
+      } else if (values[i].monitor && values[i].monitor.name === root.monitorName) {
+        guests.push(id)
+      }
     }
 
     ids.sort(function(left, right) { return left - right })
-    return ids
+    guests.sort(function(left, right) { return left - right })
+    return ids.concat(guests)
+  }
+
+  // Each workspace's layout, read with Omarchy's own command since Hyprland
+  // only reports tiled layouts and floating is kept by Omarchy.
+  property var modes: ({})
+  property bool modesStale: false
+
+  function refreshModes() {
+    if (modeProc.running) {
+      root.modesStale = true
+      return
+    }
+    var ids = root.workspaceIds().map(String)
+    modeProc.command = ["bash", "-c", "for id in \"$@\"; do printf '%s %s\\n' \"$id\" \"$(omarchy-hyprland-workspace-layout-current \"$id\")\"; done", "bash"].concat(ids)
+    modeProc.running = true
+  }
+
+  Component.onCompleted: refreshModes()
+  onRefreshTickChanged: refreshModes()
+
+  FileView {
+    path: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state") + "/omarchy/workspace-layout-notification"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: root.refreshModes()
+  }
+
+  Process {
+    id: modeProc
+    stdout: StdioCollector {
+      onStreamFinished: {
+        var next = {}
+        var lines = String(text || "").split("\n")
+        for (var i = 0; i < lines.length; i++) {
+          var fields = lines[i].trim().split(" ")
+          if (fields.length === 2 && fields[1] !== "") next[fields[0]] = fields[1]
+        }
+        root.modes = next
+      }
+    }
+    onExited: {
+      if (!root.modesStale) return
+      root.modesStale = false
+      Qt.callLater(root.refreshModes)
+    }
   }
 
   function workspaceById(id) {
@@ -142,9 +173,27 @@ BarWidget {
     return null
   }
 
+  function dispatch(expression) {
+    if (root.bar) root.bar.run("hyprctl dispatch " + Util.shellQuote(expression))
+  }
+
   function focusWorkspace(id) {
+    if (root.blockOf(id) === root.block) {
+      root.dispatch("o.workspaces.focus(" + root.slotOf(id) + ", \"" + root.monitorName + "\")")
+    } else {
+      root.dispatch("hl.dsp.focus({ workspace = \"" + id + "\" })")
+    }
+  }
+
+  // The layout commands act on the focused workspace, so a click on another
+  // monitor's bar focuses that monitor first.
+  function cycleLayout() {
     if (!root.bar) return
-    root.bar.run("hyprctl dispatch " + Util.shellQuote("hl.dsp.focus({ workspace = \"" + id + "\" })"))
+    var command = "omarchy-hyprland-workspace-layout-toggle"
+    if (root.monitor && !root.monitor.focused) {
+      command = "hyprctl dispatch " + Util.shellQuote("hl.dsp.focus({ monitor = \"" + root.monitorName + "\" })") + " >/dev/null && " + command
+    }
+    root.bar.run(command)
   }
 
   // Jump to one window from the popover: focus it (which follows it across
@@ -324,9 +373,18 @@ BarWidget {
 
     function onRawEvent(event) {
       var topic = String(event.name || "").toLowerCase()
-      var layout = topic === "workspace" || topic === "createworkspace" || topic === "destroyworkspace" ||
-        topic === "movewindow" || topic === "movewindowworkspace" || topic === "monitoradded" ||
-        topic === "monitorremoved" || topic === "focusedmon" || topic === "activespecial"
+      var layout = topic === "workspace" || topic === "workspacev2" || topic === "createworkspace" ||
+        topic === "destroyworkspace" || topic === "movewindow" || topic === "movewindowworkspace" ||
+        topic === "moveworkspace" || topic === "moveworkspacev2" || topic === "changeworkspaceid" ||
+        topic === "monitoradded" || topic === "monitorremoved" || topic === "focusedmon" ||
+        topic === "activespecial" || topic === "configreloaded"
+      // Quickshell misses the workspace a monitor falls back to and the
+      // workspaces that change number, so ask Hyprland for the truth.
+      var switched = topic === "workspacev2" && root.monitor !== null && root.monitor.focused
+      if (switched || topic === "moveworkspacev2" || topic === "changeworkspaceid") {
+        Hyprland.refreshMonitors()
+        Hyprland.refreshWorkspaces()
+      }
       if (layout) root.refreshTick = root.refreshTick + 1
       if (layout || WorkspaceModel.isWorkspaceEvent(topic)) {
         root.refreshSerial = root.refreshSerial + 1
@@ -413,15 +471,27 @@ BarWidget {
         readonly property bool occupied: workspace !== null && workspace.toplevels.values.length > 0
         readonly property bool focused: Hyprland.focusedWorkspace !== null && Hyprland.focusedWorkspace.id === modelData
         readonly property var record: root.workspaceRecord(modelData)
+        readonly property bool shown: root.monitor !== null && root.monitor.activeWorkspace !== null && root.monitor.activeWorkspace.id === modelData
+        readonly property int slot: root.slotOf(modelData)
+        readonly property string mode: root.modes[modelData] || "dwindle"
+        readonly property bool firstGuest: root.blockOf(modelData) !== root.block && index > 0 && root.blockOf(root.workspaceIds()[index - 1]) === root.block
+        required property int index
+
+        // A gap sets visiting workspaces apart from the monitor's own.
+        Layout.leftMargin: firstGuest && !root.vertical ? Style.space(6) : 0
+        Layout.topMargin: firstGuest && root.vertical ? Style.space(6) : 0
 
         bar: root.bar
-        text: modelData === 10 ? "0" : String(modelData)
-        opacity: occupied || focused ? 1 : 0.5
+        text: slot === root.slots ? "0" : String(slot)
+        opacity: occupied || focused || shown ? 1 : 0.5
         horizontalMargin: 6
         verticalPadding: 6
         fixedWidth: root.vertical ? root.barSize : Style.space(20)
         fixedHeight: root.barSize
-        onPressed: function() { root.focusWorkspace(modelData) }
+        onPressed: function() {
+          if (shown) root.cycleLayout()
+          else root.focusWorkspace(modelData)
+        }
         onTooltipHoveredChanged: {
           if (wsButton.tooltipHovered) root.requestPopover(wsButton, wsButton.record)
           else root.leavePopoverTarget(wsButton)
@@ -433,7 +503,7 @@ BarWidget {
           readonly property real inset: Style.spaceReal(2)
           readonly property bool barTop: !root.bar || root.bar.position !== "bottom"
 
-          visible: parent.focused && parent.labelWidth > 0
+          visible: parent.focused && parent.mode === "dwindle" && parent.labelWidth > 0
           z: 1
           color: Color.accent
           radius: thickness / 2
@@ -455,6 +525,56 @@ BarWidget {
 
           Behavior on x { enabled: visible; NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
           Behavior on y { enabled: visible; NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+        }
+
+        // Same metrics the button uses to center its number, so a box drawn
+        // around it lands on the figures rather than the line box.
+        FontMetrics {
+          id: figureMetrics
+          font.family: wsButton.fontFamily
+          font.pixelSize: wsButton.fontSize
+        }
+        readonly property real figureHeight: figureMetrics.tightBoundingRect("0").height
+        readonly property real figureOffset: root.vertical ? 0
+          : (figureMetrics.descent - figureMetrics.ascent + figureHeight) / 2
+
+        // Scrolling: a dot where the tiling underline would sit.
+        Rectangle {
+          id: scrollingDot
+          readonly property real size: Style.spaceReal(3)
+          readonly property real inset: Style.spaceReal(2)
+          readonly property bool barTop: !root.bar || root.bar.position !== "bottom"
+
+          visible: parent.focused && parent.mode === "scrolling" && parent.labelWidth > 0
+          z: 1
+          color: Color.accent
+          radius: size / 2
+          width: size
+          height: size
+          x: root.vertical
+            ? (root.bar && root.bar.position === "left"
+                ? parent.width - width - inset
+                : inset)
+            : (parent.width - width) / 2
+          y: root.vertical
+            ? (parent.height - height) / 2
+            : (barTop
+                ? parent.height - height - inset
+                : inset)
+        }
+
+        // Floating: a box around the number.
+        Rectangle {
+          visible: parent.focused && parent.mode === "floating" && parent.labelWidth > 0
+          z: 1
+          anchors.centerIn: parent
+          anchors.verticalCenterOffset: parent.figureOffset
+          width: parent.labelWidth + Style.spaceReal(9)
+          height: parent.figureHeight + Style.spaceReal(8)
+          color: "transparent"
+          border.color: Color.accent
+          border.width: Style.spaceReal(2)
+          radius: Style.spaceReal(2)
         }
       }
     }

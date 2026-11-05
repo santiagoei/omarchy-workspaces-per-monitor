@@ -6,23 +6,24 @@ inside it.
 
 `omarchy.workspaces` paints the full workspace list on every bar, so with
 two monitors each bar fills up with numbers you will never click from that
-screen. This widget filters the list by the monitor the bar surface is
-mapped to, and keeps the useful part: click to switch, hover to see what
-lives there.
+screen. This widget shows only the monitor's own workspaces, numbered the
+way Omarchy numbers them, and keeps the useful part: click to switch, hover
+to see what lives there.
 
 ## Features
 
-- **Per-monitor filtering.** Workspaces follow their monitor: if workspace
-  4 moves onto the eDP-1 screen, eDP-1's bar grows to show it and DP-1's
-  bar drops it. An id *pinned* to a monitor (see `ranges`) never leaves it.
+- **Per-monitor blocks.** Each monitor shows its own block of workspaces,
+  labelled 1–10 as Omarchy labels them (the block comes from Omarchy's
+  `monitor-workspaces` state file). The first five always show, dimmed when
+  empty; workspaces of an unplugged monitor show after them, set apart by a gap.
 - **Hover preview.** A popover lists one row per window — app icon and
   title. Clicking a row focuses that exact window and maximizes it while
   keeping the bar visible (not Hyprland's `realfullscreen`, which hides
   the menus).
-- **Quiet by default.** Empty workspaces stay dimmed; the focused one gets
-  an accent mark that adapts to the bar's edge. Workspace 10 shows as `0`.
-- **Per-monitor pinning (optional).** Lock specific workspace ids to
-  specific monitors with the `ranges` setting.
+- **Quiet by default.** Empty workspaces stay dimmed. The number is always
+  visible; its mark shows the workspace's layout: tiling underlines the
+  focused workspace, scrolling gets a dot, floating gets a box. Clicking the
+  active number cycles the layout. Workspace 10 shows as `0`.
 
 ## Install
 
@@ -49,30 +50,17 @@ omarchy plugin enable ei.workspaces-per-monitor center
 
 ## Configuration
 
-All settings live in the widget's entry in `~/.config/omarchy/shell.json`
-and are editable from the bar's widget settings UI:
-
-| Key     | Default | What it does                                              |
-| ------- | ------- | --------------------------------------------------------- |
-| `ranges`| —       | Object mapping a monitor (name or Hyprland id) to the workspace ids it should always display. |
-
-```json
-{ "id": "ei.workspaces-per-monitor",
-  "ranges": { "eDP-1": [1], "DP-1": [2, 3, 4, 5] } }
-```
-
-Keys accept monitor names (`eDP-1`) or Hyprland monitor ids. Workspaces
-that Hyprland reports on a monitor but that fall outside its configured
-range are still shown; a configured id follows its workspace to another
-monitor, except that a pinned id never *leaves* its monitor.
+The widget has no settings: which workspaces a monitor shows comes from
+Omarchy's per-monitor blocks.
 
 ## Interactions
 
-| Input            | Action                                    |
-| ---------------- | ----------------------------------------- |
-| Click a number   | Switch to that workspace                  |
-| Hover a number   | Preview its windows                       |
-| Click a row      | Focus that window and maximize it         |
+| Input                     | Action                                    |
+| ------------------------- | ----------------------------------------- |
+| Click a number            | Switch to that workspace                  |
+| Click the active number   | Cycle the workspace's layout              |
+| Hover a number            | Preview its windows                       |
+| Click a row               | Focus that window and maximize it         |
 
 ## Dependencies
 
@@ -83,8 +71,8 @@ extra packages: window and monitor data come from Quickshell's own
 ## How it works
 
 `WorkspacesPerMonitor.qml` is the widget: it resolves the Hyprland monitor
-owning its bar surface, derives the visible id set (live workspaces plus
-pinned ones), and drives the hover popover. `WorkspaceModel.js` builds the
+owning its bar surface, reads its workspace block from Omarchy's state file,
+and drives the hover popover. `WorkspaceModel.js` builds the
 per-workspace window records, `WorkspacePopover.qml` and `AppIcon.qml`
 render the preview.
 
