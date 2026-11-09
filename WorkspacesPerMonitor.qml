@@ -488,8 +488,8 @@ BarWidget {
         verticalPadding: 6
         fixedWidth: root.vertical ? root.barSize : Style.space(20)
         fixedHeight: root.barSize
-        onPressed: function() {
-          if (shown) root.cycleLayout()
+        onPressed: function(button) {
+          if (shown && button === Qt.RightButton) root.cycleLayout()
           else root.focusWorkspace(modelData)
         }
         onTooltipHoveredChanged: {

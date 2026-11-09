@@ -22,7 +22,7 @@ to see what lives there.
   the menus).
 - **Quiet by default.** Empty workspaces stay dimmed. The number is always
   visible; its mark shows the workspace's layout: tiling underlines the
-  focused workspace, scrolling gets a dot, floating gets a box. Clicking the
+  focused workspace, scrolling gets a dot, floating gets a box. Right-clicking the
   active number cycles the layout. Workspace 10 shows as `0`.
 
 ## Install
@@ -58,7 +58,7 @@ Omarchy's per-monitor blocks.
 | Input                     | Action                                    |
 | ------------------------- | ----------------------------------------- |
 | Click a number            | Switch to that workspace                  |
-| Click the active number   | Cycle the workspace's layout              |
+| Right-click the active number | Cycle the workspace's layout           |
 | Hover a number            | Preview its windows                       |
 | Click a row               | Focus that window and maximize it         |
 
